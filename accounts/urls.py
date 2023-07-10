@@ -9,6 +9,7 @@ urlpatterns = [
     # path("token/", ObtainAuthToken.as_view()),
     path("login/", views.LoginView.as_view()),
     path("logout/", views.LogoutView.as_view()),
+    # 建立新用戶的時候需要驗證？
     path("register/", views.UserView.as_view({"post": "create"})),
 ]
 

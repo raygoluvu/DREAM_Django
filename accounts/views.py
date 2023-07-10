@@ -24,7 +24,7 @@ class LoginView(APIView):
             login(request, user)
             return Response({"message": "Login successfully"}, status=200)
         else:
-            return Response({"message": "Invalid credentials"}, status=401)
+            return Response({"message": "Invalid credentials", "user_info": {"username": username, "pwd": password}}, status=401)
 
 
 class LogoutView(APIView):
@@ -40,16 +40,17 @@ class UserView(ModelViewSet):
     serializer_class = UserSerializers
 
     def perform_create(self, serializer):
-        password = make_password(serializer.validated_data["password"])
+        password = make_password(serializer.validated_data["password"])  # 加密
         serializer.save(password=password)
 
-    def get_permissions(self):
+    # 針對操作設定權限，提供身分驗證的機制，但是在有帳號之前不會有權限導致沒辦法建立帳號。
+    def get_permissions(self):  #
         if self.action == "list":
             permission_classes = [IsAdminUser]
         elif self.action == "retrieve":
             permission_classes = [IsUserOrAdmin]
         else:
-            permission_classes = [IsAuthenticated]
+            permission_classes = [AllowAny]
         return [permission() for permission in permission_classes]
 
     # def perform_create(self, serializer):
