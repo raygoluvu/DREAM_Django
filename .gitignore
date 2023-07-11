@@ -17,7 +17,7 @@ local_settings.py
 
 # Ignore virtual environment directories
 venv/
-env/
+slowpoke_env/
 
 # Ignore IDE specific files
 .vscode/
