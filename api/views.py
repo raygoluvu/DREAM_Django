@@ -9,12 +9,16 @@ from api.utils.ethereum import mint_test, read_test, w3
 from .models import Coupon, Thing, Gear, Exercise, Wear, WeekTask
 from accounts.permissions import IsOwnerOrAdmin, IsUserOrAdmin
 from django.db import transaction
-from django.db.models import Sum, Value, F, IntegerField,ExpressionWrapper, Count
+from django.db.models import Sum, Value, F
 from django.http import Http404
 from django.db.models.functions import Coalesce
+from django.shortcuts import render
+from django.views.decorators.csrf import csrf_exempt
+from firebase_admin import messaging
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.exceptions import NotFound
@@ -73,7 +77,8 @@ class GearView(ModelViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         lucky = self.generate_lucky(data.get("lucky"))
-        logs = {"type": data.get("type"), "level": data.get("level"), "lucky": lucky}
+        logs = {"type": data.get("type"), "level": data.get(
+            "level"), "lucky": lucky}
         hex_logs = w3.to_hex(text=str(logs))
         decode_logs = w3.to_text(hex_logs)
         print(f"hex_logs: {hex_logs}", f"decode_logs: {decode_logs}", sep="\n")
@@ -90,7 +95,8 @@ class GearView(ModelViewSet):
         if not status:
             return Response({"error": "mint error"}, status=400)
 
-        gear = serializer.save(user=request.user, token_id=token_id, lucky=lucky)
+        gear = serializer.save(
+            user=request.user, token_id=token_id, lucky=lucky)
 
         return Response(
             {"tx": res, "uri": gear.uri, "gear": {**serializer.data}}, status=200
@@ -145,10 +151,10 @@ class GearView(ModelViewSet):
 class ExerciseView(ModelViewSet):
     queryset = Exercise.objects.all()
     serializer_class = ExerciseSerializers
-    permission_classes = [IsAuthenticated] #記得更新
+    permission_classes = [IsAuthenticated]  # 記得更新
 
     def gacha(self, user):
-         # 設定各等級小物的機率值
+        # 設定各等級小物的機率值
         probabilities = Thing.probabilities
         # 根據機率隨機獲取一個等級
         choices = [*probabilities.keys()]
@@ -175,23 +181,23 @@ class ExerciseView(ModelViewSet):
             "type": new_thing.type,
             "amount": new_thing.amount,
         }
-        
+
     def handle_task(self, exercise, user):
         if exercise.exists():
             return None
-        
+
         task = user.task
         if task.delta > timedelta(days=task.count) or task.delta >= timedelta(days=7):
             task.count = 0
-            
+
         today = datetime.now().date()
         # task = user.task
         # delta = today - task.week_start
-        
+
         if task.delta == timedelta(days=task.count - 1):  # 已完成
             return None
 
-        gacha = None    
+        gacha = None
         if task.delta == timedelta(days=task.count) and task.count != 0:  # 連續
             task.count += 1
             if task.count >= 7:
@@ -209,15 +215,16 @@ class ExerciseView(ModelViewSet):
 
         task.save()  # 保存更新後的 WeekTask
         res = {"status": status, "count": task.count}
-   
-        return {**res, "thing":gacha} if gacha else res
+
+        return {**res, "thing": gacha} if gacha else res
 
     def handle_thing(self, request, data, valid_count, lucky):  # type 轉成string, 待改
         thing_level = data.get("thing")
         if thing_level == None:
             return None
 
-        thing = Thing.objects.filter(user=request.user, type=thing_level).first()
+        thing = Thing.objects.filter(
+            user=request.user, type=thing_level).first()
         if not thing or thing.amount == 0:
             raise PermissionDenied("You don't have any thing of given type")
 
@@ -237,21 +244,22 @@ class ExerciseView(ModelViewSet):
         # gear = data.get("gear")
         count = data.get("count")
         accuracy = data.get("accuracy")
-        # validated_data['accuracy'] = 
+        # validated_data['accuracy'] =
         valid_count = round(count * accuracy)
-        
+
         today = datetime.now().date()
 
         # if gear.user != request.user:
         #     raise PermissionDenied("You are not allowed to modify this gear.")
-        user = request.user if request.user.is_authenticated else User.objects.get(username="root") #測試完移除
+        user = request.user if request.user.is_authenticated else User.objects.get(
+            username="root")  # 測試完移除
         gear = user.wear.target
-        
+
         if gear is None:
             raise PermissionDenied("You haven't set the target gear !")
-        
+
         if valid_count < gear.work_min:
-            return Response({"status":"WORKMIN_FAILED", "message":"workmin isn't reached !", "workmin": gear.work_min, "valid_count":valid_count})
+            return Response({"status": "WORKMIN_FAILED", "message": "workmin isn't reached !", "workmin": gear.work_min, "valid_count": valid_count})
 
         daily_exercise = Exercise.objects.filter(
             timestamp__date=today, user=user
@@ -260,10 +268,9 @@ class ExerciseView(ModelViewSet):
         current_count = (
             daily_exercise.filter(
                 user=user,
-            ).aggregate(total=Coalesce( Sum(ExpressionWrapper(F("count") * F("accuracy"), output_field=IntegerField())), Value(0)))
+            ).aggregate(total=Coalesce(Sum(ExpressionWrapper(F("count") * F("accuracy"), output_field=IntegerField())), Value(0)))
         )["total"]
-    
-        
+
         if current_count >= gear.work_max:
             raise PermissionDenied(
                 "You have already reached the maximum exp for this gear today"
@@ -271,20 +278,21 @@ class ExerciseView(ModelViewSet):
 
         left_count = gear.work_max - current_count
         daily_max_flag = False
-        
+
         _valid_count = valid_count
-        if  valid_count >= left_count:
+        if valid_count >= left_count:
             _valid_count = left_count
             daily_max_flag = True
-   
+
         thing = self.handle_thing(request, data, valid_count, gear.lucky)
         bonus = thing.get("bonus", 0) if thing else 0
         task = self.handle_task(daily_exercise, gear.user)
-        
+
         exp = round(_valid_count * gear.lucky + bonus, 2)
         gear.exp = min(round(gear.exp + exp, 2), gear.goal_exp)
-        exp = exp if gear.exp < gear.goal_exp else round(gear.goal_exp - exp, 2)
-        
+        exp = exp if gear.exp < gear.goal_exp else round(
+            gear.goal_exp - exp, 2)
+
         gear.save()
         serializer.save(user=user, gear=gear, exp=exp)
 
@@ -292,10 +300,10 @@ class ExerciseView(ModelViewSet):
             {
                 "exp": exp,
                 "gear_exp": gear.exp,
-                "valid_count":valid_count,
+                "valid_count": valid_count,
                 "daily_valid_count": current_count + valid_count,
                 "daily_max_flag": daily_max_flag,
-                "gear_max_flag": gear.exp >= gear.goal_exp, 
+                "gear_max_flag": gear.exp >= gear.goal_exp,
                 "task": task,
                 "thing": thing,
             },
@@ -322,33 +330,35 @@ class ExerciseDayView(APIView):  # 使用者每日運動種類與次數 目前�
 
     def get(self, request, year, month, day):
         query = Exercise.objects.filter(
-                user=request.user,
-                timestamp__year=year,
-                timestamp__month=month,
-                timestamp__day=day,
-            )
+            user=request.user,
+            timestamp__year=year,
+            timestamp__month=month,
+            timestamp__day=day,
+        )
 
         exercises = (
             query
             .values("type")
             .annotate(
-                exp=Sum('exp'), 
-                valid_count=Sum(ExpressionWrapper(F("count") * F("accuracy"), output_field=IntegerField())),
-                count=Sum('count'), 
+                exp=Sum('exp'),
+                valid_count=Sum(ExpressionWrapper(
+                    F("count") * F("accuracy"), output_field=IntegerField())),
+                count=Sum('count'),
             )
             # .annotate(total_count=Sum("count"))
         )
-        
-        things = (query.values("thing").filter(thing__isnull=False)
-        .annotate(type=F("thing"), count=Count('thing', output_field=IntegerField()))
-        .values("type", "count"))
-        
 
-        total_things = things.aggregate(total_thing=Coalesce(Sum("count"), Value(0)))
+        things = (query.values("thing").filter(thing__isnull=False)
+                  .annotate(type=F("thing"), count=Count('thing', output_field=IntegerField()))
+                  .values("type", "count"))
+
+        total_things = things.aggregate(
+            total_thing=Coalesce(Sum("count"), Value(0)))
         total_count = exercises.aggregate(total_count=Sum("count"))
         total_daily_exp = exercises.aggregate(total_daily_exp=Sum("exp"))
-        total_valid_count = exercises.aggregate(total_vaild_count=Sum("valid_count"))
-        
+        total_valid_count = exercises.aggregate(
+            total_vaild_count=Sum("valid_count"))
+
         result_data = {
             item["type"]: {**item} for item in exercises
         }
@@ -356,13 +366,16 @@ class ExerciseDayView(APIView):  # 使用者每日運動種類與次數 目前�
             item["type"]: {**item} for item in things
         }
 
-        things = [ things.get(type[0]) if things.get(type[0],None) else {"type":type[0], "count":0} for type in Thing.Type.choices]
+        things = [things.get(type[0]) if things.get(type[0], None) else {
+            "type": type[0], "count":0} for type in Thing.Type.choices]
 
-        empty = {k:0 for k in ["exp","valid_count","count"]}
-        result = [ result_data.get(type[0]) if result_data.get(type[0],None) else {"type":type[0], **empty} for type in Exercise.Type.choices]
-        
-        res = {**total_count, **total_daily_exp, **total_valid_count, **total_things, "exercise":ExerciseSerializers(query, many=True).data}
-        return Response(res if len(exercises)>0 else [])
+        empty = {k: 0 for k in ["exp", "valid_count", "count"]}
+        result = [result_data.get(type[0]) if result_data.get(type[0], None) else {
+            "type": type[0], **empty} for type in Exercise.Type.choices]
+
+        res = {**total_count, **total_daily_exp, **total_valid_count, **
+               total_things, "exercise": ExerciseSerializers(query, many=True).data}
+        return Response(res if len(exercises) > 0 else [])
 
 
 class ExerciseMonthView(APIView):
@@ -385,6 +398,7 @@ class ExerciseMonthView(APIView):
 
         return Response(list(exercises))
 
+
 class ExerciseNFTView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -400,14 +414,16 @@ class ExerciseNFTView(APIView):
             num_of_record=Count('id')
         ).order_by("timestamp__date")
         dates = exercises.values_list("date", flat=True)
-        exercises = exercises.values("type", "total_count","total_valid_count", "total_exp", "num_of_record")
-   
+        exercises = exercises.values(
+            "type", "total_count", "total_valid_count", "total_exp", "num_of_record")
+
         res = defaultdict(list)
         for date, exercise in zip(dates, exercises):
             res[str(date)].append(exercise)
-        res = [{'date':k, 'data':v} for k,v in res.items()]
+        res = [{'date': k, 'data': v} for k, v in res.items()]
         return Response(res)
-    
+
+
 class ExerciseWeekView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -440,7 +456,8 @@ class GachaAPIView(APIView):
         level = random.choices(choices, weights=values)[0]
 
         # 檢查是否已經有同一等級的thing存在
-        existing_thing = Thing.objects.filter(user=request.user, type=level).first()
+        existing_thing = Thing.objects.filter(
+            user=request.user, type=level).first()
 
         if existing_thing:
             # 如果已存在，將amount加一
@@ -609,6 +626,55 @@ class readView(APIView):
             print(err)
             return Response({"error": str(err)}, status=400)
 
+
+class FCMView(APIView):
+    authentication_classes = []
+
+    def get(self, request):
+        try:
+            return render(request, 'index.html')
+        except Exception as err:
+            return Response({"error": str(err)}, status=400)
+
+    def post(self, request):
+        try:
+            user = request.user
+            return Response({"USER:": user}, status=400)
+        except Exception as err:
+            return Response({"error": str(err)}, status=400)
+
+
+# Not active for now, using django.cron service
+# class SendPeriodicFCMView(APIView):
+#    def post(self, request):
+#        # 檢查是否24小時內已經發送過通知
+#        last_notification_time = request.session.get('last_notification_time')
+#        if last_notification_time:
+#            current_time = datetime.datetime.now()
+#            time_difference = current_time - last_notification_time
+#            if time_difference.total_seconds() < 24 * 3600:  # 24小時的秒數
+#                return Response({"message": "24小時內已經發送過通知"})
+
+#        # 設置通知內容
+#        message = messaging.Message(
+#            notification=messaging.Notification(
+#                title="Title",
+#                body="Content",
+#            ),
+#            token="Token",
+#        )
+
+#        # 發送通知
+#        response = messaging.send(message)
+
+#        # 更新上次通知時間
+#        request.session['last_notification_time'] = datetime.datetime.now()
+
+#        # 檢查是否成功發送
+#        if response:
+#            return Response({"message": "通知已成功發送"})
+#        else:
+#            return Response({"message": "通知發送失敗"})
 
 # class mintView(APIView):
 #     permission_classes = [IsAuthenticated]

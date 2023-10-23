@@ -22,7 +22,7 @@ from django.conf.urls.static import static
 urlpatterns = [
     path("", include("client.urls")),
     path("user/", include("accounts.urls")),
-    
+
     # path("account/", include("accounts.urls")),
     path("api/", include("api.urls")),
     path("admin/", admin.site.urls),
@@ -32,6 +32,19 @@ urlpatterns += [
     path("api-auth/", include("rest_framework.urls")),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL,
-                          document_root=settings.MEDIA_ROOT)
+
+# Firebase Messaging
+urlpatterns += [
+    path("firebase-messaging-sw.js",
+         TemplateView.as_view(
+             template_name="firebase-messaging-sw.js",
+             content_type="application/javascript",
+         ),
+         name="firebase-messaging-sw.js"
+         )
+]
+
+
+# if settings.DEBUG:
+#    urlpatterns += static(settings.MEDIA_URL,
+#                          document_root=settings.MEDIA_ROOT)

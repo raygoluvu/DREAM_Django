@@ -9,18 +9,21 @@ https://docs.djangoproject.com/en/4.2/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
+from pathlib import Path
 import os
 # .env
 from datetime import timedelta
 from dotenv import load_dotenv
+from firebase_admin import initialize_app
+from firebase_admin import credentials
+import firebase_admin
+import os
 
-load_dotenv("/home/dream/Desktop/dreamDB-master/.env") 
+load_dotenv("/home/dream/Desktop/dreamDB-master/.env")
 
 # import os
 # private_key = os.environ.get('PRIVATE_KEY')
 
-
-from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -46,6 +49,8 @@ INSTALLED_APPS = [
     "rest_framework",
     # "rest_framework.authtoken",
     "rest_framework_simplejwt",
+    # "webpush",
+    'fcm_django',
     "corsheaders",  # CORS
     "django.contrib.admin",
     "django.contrib.auth",
@@ -53,7 +58,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    
+    "django_cron"
 ]
 
 MIDDLEWARE = [
@@ -106,13 +111,13 @@ WSGI_APPLICATION = "dream.wsgi.application"
 # }
 
 DATABASES = {
-    'default':{
-        'ENGINE':'django.db.backends.mysql',
-        'NAME':'dream',
-        'USER':'debian-sys-maint',
-        'PASSWORD':'TLJh7QjWLbF63Xd8',
-        'HOST':'127.0.0.1',
-        'PORT':'3306',
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'dream',
+        'USER': 'debian-sys-maint',
+        'PASSWORD': 'TLJh7QjWLbF63Xd8',
+        'HOST': '127.0.0.1',
+        'PORT': '3306',
     }
 }
 
@@ -170,11 +175,12 @@ AUTHENTICATION_BACKENDS = [
     "accounts.backends.UserAuthBackend",
     # "django.contrib.auth.backends.ModelBackend",
 ]
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",  # using admin site
-        
+
         # "rest_framework.authentication.TokenAuthentication",
     ],
 }
@@ -212,3 +218,26 @@ CSRF_COOKIE_SECURE = False
 
 # # Set the session age (e.g., 1 day)
 # SESSION_COOKIE_AGE = 86400  # 1 day in seconds
+
+# Firebase Settings
+# FIREBASE_APP = initialize_app()
+
+FCM_DJANGO_SETTINGS = {
+    # default: _('FCM Django')
+    "APP_VERBOSE_NAME": "FCM Django",
+    # true if you want to have only one active device per registered user at a time
+    # default: False
+    "ONE_DEVICE_PER_USER": False,
+    # devices to which notifications cannot be sent,
+    # are deleted upon receiving error response from FCM
+    # default: False
+    "DELETE_INACTIVE_DEVICES": False,
+}
+cred = credentials.Certificate(
+    os.path.join(BASE_DIR, './credentials.json'))
+firebase_admin.initialize_app(cred)
+
+CRON_CLASSES = [
+    "api.cron.SendFCMNotificationJob",
+    # ...
+]

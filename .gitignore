@@ -30,3 +30,4 @@ env/
 *.log
 logs/
 *.pid
+*.json
